@@ -1,0 +1,6 @@
+node_modules/
+.env
+downloads/
+connections.json
+bot.log
+.DS_Store
