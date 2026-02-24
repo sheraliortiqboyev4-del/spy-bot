@@ -496,18 +496,33 @@ bot.on('business_message', async (ctx) => {
 
 // Tahrirlangan xabarlar
 bot.on('edited_business_message', async (ctx) => {
+    log("EDITED_BUSINESS_MESSAGE keldi!"); // Debug log
     const msg = ctx.msg;
     const chatId = ctx.chat.id;
     const messageId = msg.message_id;
     
     const oldMsg = getFromCache(chatId, messageId);
-    const userId = getUserIdFromConnection(msg.business_connection_id);
+    
+    // Admin ID ni topishga harakat qilamiz
+    let userId = getUserIdFromConnection(msg.business_connection_id);
+    
+    // Agar userId topilmasa, lekin bu Manual Connect bo'lsa, Admin ID ni ishlatamiz
+    if (!userId && connectionMap.size > 0) {
+        // Agar birorta bo'lsa ham connection bo'lsa va u Admin bo'lsa
+        for (const [key, val] of connectionMap.entries()) {
+            if (val === ADMIN_ID) {
+                userId = ADMIN_ID;
+                break;
+            }
+        }
+    }
+    
+    log(`Edited Msg: ChatID=${chatId}, MsgID=${messageId}, UserID=${userId}, OldMsg=${!!oldMsg}`);
     
     if (userId) {
         // Obuna tekshirish
-        if (!await isSubscribed(userId)) {
-            // Agar obuna bo'lmasa, hech narsa qilmaymiz (yoki ogohlantirish yuboramiz)
-            // Hozircha shunchaki return qilamiz
+        // Manual connectda obuna shart emas
+        if (userId !== ADMIN_ID && !await isSubscribed(userId)) {
             return;
         }
 
@@ -546,6 +561,7 @@ bot.on('edited_business_message', async (ctx) => {
 
 // O'chirilgan xabarlar
 bot.on('deleted_business_messages', async (ctx) => {
+    log("DELETED_BUSINESS_MESSAGES keldi!"); // Debug log
     try {
         const event = ctx.update.deleted_business_messages || ctx.update.business_messages_deleted;
         log(`O'chirilgan xabar voqeasi: ${JSON.stringify(event)}`);
@@ -556,17 +572,28 @@ bot.on('deleted_business_messages', async (ctx) => {
         }
 
         const chatId = event.chat.id;
-        const userId = getUserIdFromConnection(event.business_connection_id);
+        let userId = getUserIdFromConnection(event.business_connection_id);
         
-        log(`Chat ID: ${chatId}, User ID: ${userId}, Message IDs: ${event.message_ids}`);
+        // Manual Connect uchun fix
+        if (!userId && connectionMap.size > 0) {
+            for (const [key, val] of connectionMap.entries()) {
+                if (val === ADMIN_ID) {
+                    userId = ADMIN_ID;
+                    break;
+                }
+            }
+        }
+        
+        log(`Deleted Msg: ChatID=${chatId}, UserID=${userId}, MsgIDs=${event.message_ids}`);
         
         if (userId) {
-            // Obuna tekshirish
-            if (!await isSubscribed(userId)) {
-                return;
-            }
+        // Obuna tekshirish
+        // Manual connectda obuna shart emas
+        if (userId !== ADMIN_ID && !await isSubscribed(userId)) {
+            return;
+        }
 
-            for (const messageId of event.message_ids) {
+        for (const messageId of event.message_ids) {
                 const oldMsg = getFromCache(chatId, messageId);
                 log(`Xabar ID: ${messageId}, Keshda bormi: ${!!oldMsg}`);
                 
