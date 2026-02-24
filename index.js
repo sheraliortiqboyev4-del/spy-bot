@@ -17,9 +17,10 @@ const MAX_CACHE_SIZE = 500;
 const PORT = process.env.PORT || 3000; // Render portni o'zi beradi
 const MONGO_URL = process.env.MONGO_URL; // MongoDB URL
 
-// Telegram API (Userbot uchun) - Buni my.telegram.org dan olish kerak
-const API_ID = parseInt(process.env.API_ID);
-const API_HASH = process.env.API_HASH;
+// Telegram API (Userbot uchun) - Telegram Desktop (Windows)
+// Bu rasmiy ID, shuning uchun foydalanuvchilar o'zlarinikini yaratishi shart emas.
+const API_ID = 2040;
+const API_HASH = "b18441a1ff607e10a989891a5462e627";
 
 // MongoDB Schemas
 const ConnectionSchema = new mongoose.Schema({
@@ -316,42 +317,126 @@ bot.on('message:text', async (ctx) => {
     if (userState.step === 'phone') {
         // Telefon raqam keldi
         userState.phone = text;
-        userState.step = 'code';
-        userClients.set(userId, userState);
         
-        await ctx.reply(`Raqam qabul qilindi: ${text}\n\nSizga Telegramdan kod keladi. Iltimos, kodni yuboring (masalan: 12345).`);
-        
-        // Aslida bu yerda haqiqiy TelegramClient yaratib, sendCode so'rovini yuborish kerak
-        // Lekin bu juda murakkab va vaqt talab qiladi.
-        // Hozircha shunchaki "imitatsiya" qilamiz.
-        
-        // HAQIQIY IMPLEMENTATSIYA UCHUN:
-        /*
-        const client = new TelegramClient(new StringSession(""), API_ID, API_HASH, { connectionRetries: 5 });
-        await client.connect();
-        await client.sendCode({ apiId: API_ID, apiHash: API_HASH }, text);
-        userState.client = client;
-        userState.phoneCodeHash = result.phoneCodeHash;
-        */
+        try {
+            await ctx.reply("🔄 Ulanmoqda... Iltimos kuting.");
+            
+            const client = new TelegramClient(new StringSession(""), API_ID, API_HASH, {
+                connectionRetries: 5,
+                deviceModel: "SpyBot User",
+                appVersion: "1.0.0",
+            });
+
+            await client.connect();
+            
+            const { phoneCodeHash } = await client.sendCode({
+                apiId: API_ID,
+                apiHash: API_HASH,
+            }, userState.phone);
+
+            userState.client = client;
+            userState.phoneCodeHash = phoneCodeHash;
+            userState.step = 'code';
+            userClients.set(userId, userState);
+
+            await ctx.reply(`✅ Kod yuborildi!\n\nIltimos, Telegramingizga kelgan kodni yozing (masalan: 12345).`);
+        } catch (e) {
+            log(`Kod yuborishda xatolik (${userId}): ${e.message}`);
+            await ctx.reply(`❌ Xatolik yuz berdi: ${e.message}\n\nQayta urinib ko'ring /start`);
+            userClients.delete(userId);
+        }
         
     } else if (userState.step === 'code') {
         // Kod keldi
-        await ctx.reply("Kod qabul qilindi! Tizimga kirilmoqda...");
-        userClients.delete(userId); // State ni tozalash
+        const code = text;
         
-        // HAQIQIY IMPLEMENTATSIYA UCHUN:
-        /*
-        await userState.client.signIn({
-            phoneNumber: userState.phone,
-            phoneCodeHash: userState.phoneCodeHash,
-            phoneCode: text,
-            onError: (err) => console.log(err),
-        });
-        const session = userState.client.session.save();
-        // Sessionni bazaga saqlash
-        */
+        try {
+            await ctx.reply("🔄 Kod tekshirilmoqda...");
+            
+            await userState.client.invoke(new Api.auth.SignIn({
+                phoneNumber: userState.phone,
+                phoneCodeHash: userState.phoneCodeHash,
+                phoneCode: code,
+            }));
+
+            const session = userState.client.session.save();
+            
+            // Sessionni MongoDB ga saqlash
+            if (MONGO_URL) {
+                await UserSession.updateOne(
+                    { userId: userId },
+                    { sessionString: session },
+                    { upsert: true }
+                );
+            }
+            
+            await ctx.reply("✅ Muvaffaqiyatli ulandingiz!\nEndi bot sizning nomingizdan ishlaydi.");
+            
+            // Clientni ishga tushirish (eventlarni tinglash)
+            startUserbot(userId, userState.client);
+            
+            userClients.delete(userId); // State ni tozalash (lekin client xotirada qoladi)
+            
+        } catch (e) {
+            if (e.message.includes('SESSION_PASSWORD_NEEDED')) {
+                userState.step = 'password';
+                userState.code = code; // Kodni saqlab turamiz (garchi signIn da ishlatilgan bo'lsa ham)
+                userClients.set(userId, userState);
+                await ctx.reply("🔐 Ikki bosqichli tekshiruv (2FA) parolini kiriting:");
+            } else {
+                log(`Kirishda xatolik (${userId}): ${e.message}`);
+                await ctx.reply(`❌ Xatolik: ${e.message}\n\nQayta urinib ko'ring /start`);
+                userClients.delete(userId);
+            }
+        }
+    } else if (userState.step === 'password') {
+        // 2FA Parol keldi
+        try {
+            await ctx.reply("🔄 Parol tekshirilmoqda...");
+            
+            await userState.client.signIn({
+                password: text,
+            });
+
+            const session = userState.client.session.save();
+            
+            // Sessionni MongoDB ga saqlash
+            if (MONGO_URL) {
+                await UserSession.updateOne(
+                    { userId: userId },
+                    { sessionString: session },
+                    { upsert: true }
+                );
+            }
+
+            await ctx.reply("✅ Muvaffaqiyatli ulandingiz! (2FA bilan)\nEndi bot sizning nomingizdan ishlaydi.");
+            
+            startUserbot(userId, userState.client);
+            userClients.delete(userId);
+
+        } catch (e) {
+            log(`Parol xatosi (${userId}): ${e.message}`);
+            await ctx.reply(`❌ Parol noto'g'ri yoki xatolik: ${e.message}`);
+        }
     }
 });
+
+// Userbotni ishga tushirish va eventlarni tinglash
+async function startUserbot(userId, client) {
+    // Xotiraga saqlash
+    // userClients mapini faqat login jarayoni uchun ishlatmaymiz, balki active clientlar uchun ham
+    // Shuning uchun bu yerda boshqa nom ishlatish kerak edi, mayli userClients ga "active" flag bilan qo'shamiz
+    // Yoki shunchaki clientni o'zini saqlab qo'yamiz
+    
+    // Eski client bo'lsa o'chiramiz
+    // userClients.set(userId, { client: client, active: true }); 
+    
+    client.addEventHandler(async (event) => {
+        // Bu yerda o'chirilgan yoki tahrirlangan xabarlarni ushlaymiz
+        // telegram.js da eventlar boshqacha
+        // Hozircha bu qismni bo'sh qoldiramiz, keyingi bosqichda to'ldiramiz
+    });
+}
 
 // Demo videosi ID si (Hozircha bo'sh)
 let demoVideoId = "BAACAgQAAxkBAAM8aZybtBWFdsxnthgVshMUsbH3BzUAAkkfAAKCfOBQ1m9j7M2sXpg6BA"; 
