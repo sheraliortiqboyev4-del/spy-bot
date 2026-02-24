@@ -650,10 +650,14 @@ async function isSubscribed(userId) {
 // Majburiy obuna tekshiruvi (Middleware - Faqat Private Chatlar uchun)
 bot.use(async (ctx, next) => {
     // Faqat shaxsiy yozishmalar va callbacklar uchun tekshiramiz
+    // DIQQAT: Business Connection va Business Message uchun obuna tekshirish shart emas (yoki keyinroq qo'shamiz)
+    if (ctx.businessConnection || 
+        ctx.update.business_connection) {
+        return next();
+    }
+    
     if (ctx.chat?.type !== 'private' || 
-        ctx.businessConnection || 
         ctx.businessMessage || 
-        ctx.update.business_connection || 
         ctx.update.business_message || 
         ctx.update.edited_business_message || 
         ctx.update.deleted_business_messages) {
@@ -798,6 +802,19 @@ bot.command('connect', async (ctx) => {
     msg += "3. Agar shunda ham ishlamasa, demak MongoDB ga ulanishda muammo bor.\n\n";
     msg += `MongoDB holati: ${mongoose.connection.readyState === 1 ? "✅ Ulangan" : "❌ Ulanmagan"}`;
     
+    // Majburiy ulanish (agar connection ID yo'q bo'lsa ham, Admin ID ni saqlab qo'yamiz)
+    // Bu vaqtinchalik yechim, chunki haqiqiy connection ID faqat business_connection dan keladi.
+    // Lekin biz shunchaki bazani "ishlatib yuborish" uchun shunday qilamiz.
+    
+    try {
+        const fakeConnectionId = `manual_connect_${Date.now()}`;
+        connectionMap.set(fakeConnectionId, ADMIN_ID);
+        await saveConnections();
+        msg += "\n\n✅ Admin majburiy ulandi (Manual Connect)!";
+    } catch (e) {
+        msg += `\n\n❌ Majburiy ulanishda xatolik: ${e.message}`;
+    }
+
     await ctx.reply(msg, { parse_mode: "HTML" });
 });
 
