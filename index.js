@@ -779,6 +779,28 @@ bot.command('debug', async (ctx) => {
     await ctx.reply(status, { parse_mode: "HTML" });
 });
 
+// Majburiy ulanish (Manual Connect)
+bot.command('connect', async (ctx) => {
+    if (ctx.from.id !== ADMIN_ID) return;
+
+    // Admin uchun soxta connection ID yaratamiz (yoki agar bilsak haqiqiysini ishlatamiz)
+    // Telegram Business da connection ID odatda "c123..." kabi bo'ladi.
+    // Biz bu yerda shunchaki Admin ID ni "connection" deb hisoblaymiz.
+    // LEKIN: Business Message kelganda connection ID boshqacha bo'ladi.
+    // Shuning uchun bu usul faqat "/stats" da "ulangan" deb ko'rsatish uchun ishlaydi.
+    // Aslida, haqiqiy connection ID ni faqat "business_connection" eventidan olish mumkin.
+    
+    // Yaxshisi, biz bu yerda shunchaki bazani tekshiramiz va agar bo'sh bo'lsa, ogohlantiramiz.
+    
+    let msg = "⚠️ <b>Diqqat:</b>\n\nSiz botni Telegram Business ga ulashingiz kerak. Buni qo'lda qilib bo'lmaydi.\n\n";
+    msg += "1. Telegram Sozlamalar -> Telegram Business -> Chatbot ga kiring.\n";
+    msg += "2. Botni o'chiring va qayta qo'shing.\n";
+    msg += "3. Agar shunda ham ishlamasa, demak MongoDB ga ulanishda muammo bor.\n\n";
+    msg += `MongoDB holati: ${mongoose.connection.readyState === 1 ? "✅ Ulangan" : "❌ Ulanmagan"}`;
+    
+    await ctx.reply(msg, { parse_mode: "HTML" });
+});
+
 // Xatolarni ushlash
 bot.catch((err) => {
     const ctx = err.ctx;
