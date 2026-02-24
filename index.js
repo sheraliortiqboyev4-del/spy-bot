@@ -187,6 +187,22 @@ async function notifyAdmin(userId, text, filePath = null) {
 
 // Start buyrug'i
 bot.command('start', async (ctx) => {
+    // Obuna tekshirish
+    if (!await isSubscribed(ctx.from.id)) {
+        const channelLink = `https://t.me/${REQUIRED_CHANNEL.replace('@', '')}`;
+        const txt = `⚠️ <b>Diqqat!</b>\n\nBotdan to'liq foydalanish uchun bizning kanalga obuna bo'lishingiz shart!\n\nKanal: ${REQUIRED_CHANNEL}`;
+        
+        return ctx.reply(txt, {
+            parse_mode: "HTML",
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "➕ Obuna bo'lish", url: channelLink }],
+                    [{ text: "✅ Tekshirish", callback_data: "check_sub" }]
+                ]
+            }
+        });
+    }
+
     const firstName = escapeHTML(ctx.from.first_name);
     
     // Rasm URL (Siz xohlagan rasmga o'zgartirishingiz mumkin)
