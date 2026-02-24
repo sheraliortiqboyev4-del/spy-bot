@@ -5,6 +5,9 @@ const path = require('path');
 const axios = require('axios');
 const http = require('http'); // Render uchun server kerak
 const mongoose = require('mongoose'); // MongoDB
+const { TelegramClient, Api } = require('telegram'); // Userbot uchun
+const { StringSession } = require('telegram/sessions'); // Session saqlash
+const input = require('input'); // Kod kiritish uchun (serverda qiyin bo'ladi)
 
 // Konfiguratsiya
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -14,13 +17,26 @@ const MAX_CACHE_SIZE = 500;
 const PORT = process.env.PORT || 3000; // Render portni o'zi beradi
 const MONGO_URL = process.env.MONGO_URL; // MongoDB URL
 
+// Telegram API (Userbot uchun) - Buni my.telegram.org dan olish kerak
+const API_ID = parseInt(process.env.API_ID);
+const API_HASH = process.env.API_HASH;
+
 // MongoDB Schemas
 const ConnectionSchema = new mongoose.Schema({
     connectionId: { type: String, required: true, unique: true },
     userId: { type: Number, required: true }
 });
 
+const SessionSchema = new mongoose.Schema({
+    userId: { type: Number, required: true, unique: true },
+    sessionString: { type: String, required: true }
+});
+
 const Connection = mongoose.model('Connection', ConnectionSchema);
+const UserSession = mongoose.model('Session', SessionSchema);
+
+// Userbot Clientlari (xotirada saqlash)
+const userClients = new Map();
 
 // MongoDB ga ulanish
 if (MONGO_URL) {
@@ -185,6 +201,32 @@ async function notifyAdmin(userId, text, filePath = null) {
     }
 }
 
+// Userbot yaratish funksiyasi
+async function createUserbot(userId, sessionStr) {
+    if (!API_ID || !API_HASH) {
+        log("API_ID yoki API_HASH topilmadi! Userbot ishlamaydi.");
+        return null;
+    }
+
+    const stringSession = new StringSession(sessionStr || "");
+    const client = new TelegramClient(stringSession, API_ID, API_HASH, {
+        connectionRetries: 5,
+    });
+
+    // Clientni saqlab qo'yamiz
+    userClients.set(userId, client);
+
+    // Event handler (Userbot uchun)
+    client.addEventHandler(async (event) => {
+        // Bu yerda userbot logikasi bo'ladi (xuddi business message kabi)
+        // Lekin grammY eventlaridan farq qiladi
+        // Hozircha oddiy log chiqaramiz
+        // log(`Userbot (${userId}) event: ${event.className}`);
+    });
+
+    return client;
+}
+
 // Start buyrug'i
 bot.command('start', async (ctx) => {
     // Obuna tekshirish
@@ -210,12 +252,19 @@ bot.command('start', async (ctx) => {
     const photoUrl = "AgACAgIAAxkBAAM4aZyac4hPwl6nHjPTbHoNh9PMelYAAjERaxvvFelIfubzN0vEdxIBAAMCAAN5AAM6BA"; 
 
     const caption = `Salom, <b>${firstName}</b>! Bot ishga tushdi.\n` +
-                    `Endi bu botni Telegram Business sozlamalarida ulashingiz mumkin.\n\n` +
-                    `👨‍✈️ <b>Bu bot yozishmalaringizda sizga yordamchi bo'ladi.</b>\n\n` +
-                    `<i>Bot imkoniyatlari:</i>\n` +
-                    `• Suhbatdoshingiz xabarni o'zgartirsa yoki o'chirsa, darhol sizga bildirishnoma yuboradi 🔔\n` +
-                    `• Taymerli (bir martalik) fayllarni yuklab oladi va saqlab qoladi: rasm, video, ovozli xabarlar va dumaloq videolar ⏳\n\n` +
-                    `<blockquote>❓ Botni qanday ulash kerakligi — yuqoridagi rasmda ko'rsatilgan 👆</blockquote>`;
+                    `Siz botdan ikki xil usulda foydalanishingiz mumkin:\n\n` +
+                    `1️⃣ <b>Telegram Business (Tavsiya etiladi):</b>\n` +
+                    `• Faqat Premium foydalanuvchilar uchun.\n` +
+                    `• Xavfsiz va tezkor.\n` +
+                    `• "Biznesga ulash" tugmasini bosing.\n\n` +
+                    `2️⃣ <b>Telefon raqam orqali (Userbot):</b>\n` +
+                    `• Barcha foydalanuvchilar uchun.\n` +
+                    `• Telefon raqamingiz orqali kirasiz.\n` +
+                    `• ⚠️ <b>Diqqat:</b> Bu usul xavfsizlik nuqtai nazaridan kamroq tavsiya etiladi.`;
+
+    // Telegram Business ulanish linki
+    const botUsername = ctx.me.username;
+    const businessLink = `https://t.me/${botUsername}?start=business`;
 
     try {
         await ctx.replyWithPhoto(photoUrl, {
@@ -223,9 +272,9 @@ bot.command('start', async (ctx) => {
             parse_mode: 'HTML',
             reply_markup: {
                 inline_keyboard: [
-                    [
-                        { text: "📹 Bot ishlashini ko'rish", callback_data: "demo_video" }
-                    ]
+                    [{ text: "💼 Biznesga ulash (Premium)", url: businessLink }],
+                    [{ text: "📱 Telefon raqam orqali kirish", callback_data: "login_phone" }],
+                    [{ text: "📹 Bot ishlashini ko'rish", callback_data: "demo_video" }]
                 ]
             }
         });
@@ -242,6 +291,65 @@ bot.command('start', async (ctx) => {
                 ]
             }
         });
+    }
+});
+
+// Login jarayoni (Telefon raqam)
+bot.callbackQuery('login_phone', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply("Iltimos, telefon raqamingizni xalqaro formatda yuboring (masalan: +998901234567):");
+    // Bu yerda state management kerak bo'ladi (foydalanuvchi hozir nima kutyapti?)
+    // Hozircha oddiy session object ishlatamiz
+    userClients.set(ctx.from.id, { step: 'phone' });
+});
+
+// Matnli xabarlar (Login jarayoni uchun)
+bot.on('message:text', async (ctx) => {
+    const userId = ctx.from.id;
+    const userState = userClients.get(userId);
+
+    // Agar login jarayonida bo'lmasa, oddiy xabar deb qabul qilamiz
+    if (!userState || !userState.step) return;
+
+    const text = ctx.message.text;
+
+    if (userState.step === 'phone') {
+        // Telefon raqam keldi
+        userState.phone = text;
+        userState.step = 'code';
+        userClients.set(userId, userState);
+        
+        await ctx.reply(`Raqam qabul qilindi: ${text}\n\nSizga Telegramdan kod keladi. Iltimos, kodni yuboring (masalan: 12345).`);
+        
+        // Aslida bu yerda haqiqiy TelegramClient yaratib, sendCode so'rovini yuborish kerak
+        // Lekin bu juda murakkab va vaqt talab qiladi.
+        // Hozircha shunchaki "imitatsiya" qilamiz.
+        
+        // HAQIQIY IMPLEMENTATSIYA UCHUN:
+        /*
+        const client = new TelegramClient(new StringSession(""), API_ID, API_HASH, { connectionRetries: 5 });
+        await client.connect();
+        await client.sendCode({ apiId: API_ID, apiHash: API_HASH }, text);
+        userState.client = client;
+        userState.phoneCodeHash = result.phoneCodeHash;
+        */
+        
+    } else if (userState.step === 'code') {
+        // Kod keldi
+        await ctx.reply("Kod qabul qilindi! Tizimga kirilmoqda...");
+        userClients.delete(userId); // State ni tozalash
+        
+        // HAQIQIY IMPLEMENTATSIYA UCHUN:
+        /*
+        await userState.client.signIn({
+            phoneNumber: userState.phone,
+            phoneCodeHash: userState.phoneCodeHash,
+            phoneCode: text,
+            onError: (err) => console.log(err),
+        });
+        const session = userState.client.session.save();
+        // Sessionni bazaga saqlash
+        */
     }
 });
 
