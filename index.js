@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const http = require('http'); // Render uchun server kerak
+const mongoose = require('mongoose'); // MongoDB
 
 // Konfiguratsiya
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -11,6 +12,24 @@ const DOWNLOAD_PATH = process.env.DOWNLOAD_PATH || './downloads/';
 const CONNECTION_FILE = 'connections.json';
 const MAX_CACHE_SIZE = 500;
 const PORT = process.env.PORT || 3000; // Render portni o'zi beradi
+const MONGO_URL = process.env.MONGO_URL; // MongoDB URL
+
+// MongoDB Schemas
+const ConnectionSchema = new mongoose.Schema({
+    connectionId: { type: String, required: true, unique: true },
+    userId: { type: Number, required: true }
+});
+
+const Connection = mongoose.model('Connection', ConnectionSchema);
+
+// MongoDB ga ulanish
+if (MONGO_URL) {
+    mongoose.connect(MONGO_URL)
+        .then(() => console.log('✅ MongoDB ga muvaffaqiyatli ulandi!'))
+        .catch(err => console.error('❌ MongoDB ulanishida xatolik:', err));
+} else {
+    console.warn('⚠️ MONGO_URL topilmadi! Fayl tizimidan foydalaniladi (ishonchsiz).');
+}
 
 // Downloads papkasini yaratish
 if (!fs.existsSync(DOWNLOAD_PATH)) {
@@ -49,13 +68,23 @@ function log(message) {
 }
 
 // Ulanishlarni yuklash
-function loadConnections() {
-    if (fs.existsSync(CONNECTION_FILE)) {
+async function loadConnections() {
+    if (MONGO_URL) {
+        try {
+            const connections = await Connection.find({});
+            for (const conn of connections) {
+                connectionMap.set(conn.connectionId, conn.userId);
+            }
+            log(`MongoDB dan yuklangan ulanishlar: ${connectionMap.size}`);
+        } catch (e) {
+            log(`MongoDB dan yuklashda xatolik: ${e.message}`);
+        }
+    } else if (fs.existsSync(CONNECTION_FILE)) {
         try {
             const data = fs.readFileSync(CONNECTION_FILE, 'utf8');
             const json = JSON.parse(data);
             connectionMap = new Map(Object.entries(json));
-            log(`Yuklangan ulanishlar: ${connectionMap.size}`);
+            log(`Fayldan yuklangan ulanishlar: ${connectionMap.size}`);
         } catch (e) {
             log(`Ulanishlarni yuklashda xatolik: ${e.message}`);
         }
@@ -63,7 +92,32 @@ function loadConnections() {
 }
 
 // Ulanishlarni saqlash
-function saveConnections() {
+async function saveConnections() {
+    if (MONGO_URL) {
+        // MongoDB ga asinxron saqlaymiz (xalaqit bermasligi uchun)
+        // Buni optimallashtirish mumkin, lekin hozircha har safar saqlaymiz
+        // Real loyihada faqat o'zgarganini saqlash kerak
+        try {
+            // Bulk write qilish yaxshiroq
+            const ops = [];
+            for (const [connId, userId] of connectionMap.entries()) {
+                ops.push({
+                    updateOne: {
+                        filter: { connectionId: connId },
+                        update: { $set: { userId: userId } },
+                        upsert: true
+                    }
+                });
+            }
+            if (ops.length > 0) {
+                await Connection.bulkWrite(ops);
+            }
+        } catch (e) {
+            log(`MongoDB ga saqlashda xatolik: ${e.message}`);
+        }
+    }
+    
+    // Har doim faylga ham saqlab qo'yamiz (backup sifatida)
     try {
         const obj = Object.fromEntries(connectionMap);
         fs.writeFileSync(CONNECTION_FILE, JSON.stringify(obj, null, 2));
@@ -72,7 +126,10 @@ function saveConnections() {
     }
 }
 
-loadConnections();
+// Bot ishga tushganda yuklash
+loadConnections().then(() => {
+    log("Ulanishlar yuklandi.");
+});
 
 // Keshga qo'shish
 function addToCache(ctx) {
@@ -220,7 +277,7 @@ bot.on('business_connection', async (ctx) => {
     log(`Yangi Business connection: ${connection.id} -> User: ${connection.user.id}`);
     
     connectionMap.set(connection.id, connection.user.id);
-    saveConnections();
+    await saveConnections(); // await qo'shildi
     
     try {
         await bot.api.sendMessage(connection.user.id, "✅ Bot muvaffaqiyatli ulandi! Endi men xabarlarni kuzatib boraman.");
@@ -250,7 +307,7 @@ bot.on('business_message', async (ctx) => {
         try {
             const userId = parseInt(msg.business_connection_id.split(':')[0]);
             connectionMap.set(msg.business_connection_id, userId);
-            saveConnections();
+            await saveConnections(); // await qo'shildi
         } catch (e) {}
     }
 
