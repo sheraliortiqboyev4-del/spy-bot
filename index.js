@@ -188,26 +188,44 @@ async function notifyAdmin(userId, text, filePath = null) {
 // Start buyrug'i
 bot.command('start', async (ctx) => {
     const firstName = escapeHTML(ctx.from.first_name);
-    const welcomeText = `Salom, <b>${firstName}</b>!\nBot ishga tushdi.\n\nEndi bu botni Telegram Business sozlamalarida ulashingiz mumkin.`;
     
-    // Telegram Business ulanish linki
-    const botUsername = ctx.me.username;
-    // To'g'ri deep link formati:
-    const businessLink = `https://t.me/${botUsername}?start=business`;
+    // Rasm URL (Siz xohlagan rasmga o'zgartirishingiz mumkin)
+    // Telegram logotipi yoki oldingi rasm
+    const photoUrl = "AgACAgIAAxkBAAM4aZyac4hPwl6nHjPTbHoNh9PMelYAAjERaxvvFelIfubzN0vEdxIBAAMCAAN5AAM6BA"; 
+
+    const caption = `Salom, <b>${firstName}</b>! Bot ishga tushdi.\n` +
+                    `Endi bu botni Telegram Business sozlamalarida ulashingiz mumkin.\n\n` +
+                    `👨‍✈️ <b>Bu bot yozishmalaringizda sizga yordamchi bo'ladi.</b>\n\n` +
+                    `<i>Bot imkoniyatlari:</i>\n` +
+                    `• Suhbatdoshingiz xabarni o'zgartirsa yoki o'chirsa, darhol sizga bildirishnoma yuboradi 🔔\n` +
+                    `• Taymerli (bir martalik) fayllarni yuklab oladi va saqlab qoladi: rasm, video, ovozli xabarlar va dumaloq videolar ⏳\n\n` +
+                    `<blockquote>❓ Botni qanday ulash kerakligi — yuqoridagi rasmda ko'rsatilgan 👆</blockquote>`;
 
     try {
-        await ctx.reply(welcomeText, {
-            parse_mode: "HTML",
+        await ctx.replyWithPhoto(photoUrl, {
+            caption: caption,
+            parse_mode: 'HTML',
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: "💼 Biznesga ulash", url: businessLink }],
-                    [{ text: "📹 Bot ishlashini ko'rish", callback_data: "demo_video" }]
+                    [
+                        { text: "📹 Bot ishlashini ko'rish", callback_data: "demo_video" }
+                    ]
                 ]
             }
         });
     } catch (e) {
         log(`Start buyrug'ida xatolik: ${e.message}`);
-        await ctx.reply(welcomeText);
+        // Agar rasm yuborishda xatolik bo'lsa (masalan file_id eskirgan), matnni o'zini yuboramiz
+        await ctx.reply(caption, { 
+            parse_mode: 'HTML',
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: "📹 Bot ishlashini ko'rish", callback_data: "demo_video" }
+                    ]
+                ]
+            }
+        });
     }
 });
 
