@@ -697,6 +697,31 @@ bot.command('stats', async (ctx) => {
     );
 });
 
+// Debug buyrug'i (Serverdagi holatni tekshirish)
+bot.command('debug', async (ctx) => {
+    if (ctx.from.id !== ADMIN_ID) return;
+    
+    let status = "🔍 <b>Debug Info:</b>\n\n";
+    status += `Ulanishlar soni: ${connectionMap.size}\n`;
+    status += `Keshdagi chatlar: ${messageCache.size}\n`;
+    status += `Bot ID: ${bot.botInfo.id}\n`;
+    status += `Admin ID: ${ADMIN_ID}\n`;
+    status += `Server Port: ${PORT}\n`;
+    status += `Downloads Path: ${path.resolve(DOWNLOAD_PATH)}\n`;
+    
+    // Connectionlar ro'yxati
+    if (connectionMap.size > 0) {
+        status += "\n<b>Ulanishlar:</b>\n";
+        for (const [connId, userId] of connectionMap.entries()) {
+            status += `${connId.substring(0, 10)}... -> ${userId}\n`;
+        }
+    } else {
+        status += "\n⚠️ <b>Diqqat:</b> Hech qanday biznes ulanish topilmadi!\nTelegram Business sozlamalaridan botni qayta ulang.";
+    }
+
+    await ctx.reply(status, { parse_mode: "HTML" });
+});
+
 // Xatolarni ushlash
 bot.catch((err) => {
     const ctx = err.ctx;
