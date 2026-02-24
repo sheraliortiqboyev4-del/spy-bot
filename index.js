@@ -12,6 +12,11 @@ const CONNECTION_FILE = 'connections.json';
 const MAX_CACHE_SIZE = 500;
 const PORT = process.env.PORT || 3000; // Render portni o'zi beradi
 
+// Downloads papkasini yaratish
+if (!fs.existsSync(DOWNLOAD_PATH)) {
+    fs.mkdirSync(DOWNLOAD_PATH, { recursive: true });
+}
+
 // Render uchun oddiy server (Health check)
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
