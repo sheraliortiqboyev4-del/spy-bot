@@ -567,11 +567,21 @@ async function startUserbot(userId, client) {
         }
     }, new NewMessage({}));
 
-    // Tahrirlangan xabarlar
+    // Tahrirlangan xabarlar (Generic Handler)
     client.addEventHandler(async (event) => {
         try {
+            // Agar event tahrirlangan xabar bo'lsa
+            // GramJS da `EditedMessage` constructor xatosi bo'layotgan bo'lsa,
+            // biz `event` obyekti turini tekshirishimiz mumkin yoki shunchaki
+            // agar message mavjud bo'lsa va u keshda bo'lsa, solishtiramiz.
+
+            // Hozircha bu handler barcha eventlarni ushlaydi.
+            // Biz faqat `EditMessage` turidagi eventlarni qidiramiz.
+            // Yoki oddiygina `event.message` borligini tekshiramiz.
+
             const message = event.message;
-            if (!message) return;
+            if (!message || !message.editDate) return; // Faqat tahrirlangan xabarlar
+
             const chatId = message.chatId ? message.chatId.toString() : null;
             if (!chatId) return;
 
@@ -582,7 +592,7 @@ async function startUserbot(userId, client) {
                 const oldText = oldMsg.text || oldMsg.message || "(Media)";
                 const newText = message.text || message.message || "(Media)";
 
-                // Faqat matn o'zgargan bo'lsa
+                // Faqat matn o'zgargan bo'lsa va mazmuni farq qilsa
                 if (oldText !== newText) {
                     const txt = `✏️ **Xabar tahrirlandi (Userbot):**\n\n**Eski:**\n${oldText}\n\n**Yangi:**\n${newText}`;
                     await client.sendMessage("me", { message: txt });
@@ -595,9 +605,10 @@ async function startUserbot(userId, client) {
             }
 
         } catch (e) {
-            log(`Userbot EditedMessage error: ${e.message}`);
+            // log(`Userbot EditedMessage error: ${e.message}`);
         }
-    }, new EditedMessage({}));
+    });
+
 
     // O'chirilgan xabarlar
     client.addEventHandler(async (event) => {
@@ -731,12 +742,14 @@ bot.on('business_message', async (ctx) => {
 
     const msg = ctx.msg;
 
-    // Connection ID ni saqlash (agar yangi bo'lsa)
+        // Connection ID ni saqlash (agar yangi bo'lsa)
     if (msg.business_connection_id && !connectionMap.has(msg.business_connection_id)) {
         try {
             const userId = parseInt(msg.business_connection_id.split(':')[0]);
-            connectionMap.set(msg.business_connection_id, userId);
-            await saveConnections(); // await qo'shildi
+            if (!isNaN(userId)) {
+                connectionMap.set(msg.business_connection_id, userId);
+                await saveConnections(); // await qo'shildi
+            }
         } catch (e) { }
     }
 
