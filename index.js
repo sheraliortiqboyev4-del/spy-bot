@@ -1283,11 +1283,13 @@ bot.catch((err) => {
 // Botni ishga tushirish
 log("Bot ishga tushmoqda...");
 
-// Menyuni o'rnatish
+// Menyuni o'rnatish (Xatolik bo'lsa ham davom etaveradi)
 bot.api.setMyCommands([
     { command: "start", description: "Botni ishga tushirish" },
     { command: "stats", description: "Statistika" }
-]);
+]).catch(e => {
+    log(`Menyuni o'rnatishda xatolik (muhim emas): ${e.message}`);
+});
 
 bot.start({
     onStart: (botInfo) => {
