@@ -5,10 +5,6 @@ const path = require('path');
 const axios = require('axios');
 const http = require('http'); // Render uchun server kerak
 const mongoose = require('mongoose'); // MongoDB
-const { TelegramClient, Api } = require('telegram'); // Userbot uchun
-const { StringSession } = require('telegram/sessions'); // Session saqlash
-const { NewMessage, DeletedMessage } = require('telegram/events'); // Userbot events
-const input = require('input'); // Kod kiritish uchun (serverda qiyin bo'ladi)
 
 // Konfiguratsiya
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -18,27 +14,13 @@ const MAX_CACHE_SIZE = 500;
 const PORT = process.env.PORT || 3000; // Render portni o'zi beradi
 const MONGO_URL = process.env.MONGO_URL; // MongoDB URL
 
-// Telegram API (Userbot uchun) - Telegram Desktop (Windows)
-// Bu rasmiy ID, shuning uchun foydalanuvchilar o'zlarinikini yaratishi shart emas.
-const API_ID = 2040;
-const API_HASH = "b18441a1ff607e10a989891a5462e627";
-
 // MongoDB Schemas
 const ConnectionSchema = new mongoose.Schema({
     connectionId: { type: String, required: true, unique: true },
     userId: { type: Number, required: true }
 });
 
-const SessionSchema = new mongoose.Schema({
-    userId: { type: Number, required: true, unique: true },
-    sessionString: { type: String, required: true }
-});
-
 const Connection = mongoose.model('Connection', ConnectionSchema);
-const UserSession = mongoose.model('Session', SessionSchema);
-
-// Userbot Clientlari (xotirada saqlash)
-const userClients = new Map();
 
 // MongoDB ga ulanish
 if (MONGO_URL) {
@@ -144,45 +126,9 @@ async function saveConnections() {
     }
 }
 
-// Sessionlarni yuklash va Userbotlarni ishga tushirish
-async function loadSessions() {
-    if (!API_ID || !API_HASH) return;
-
-    try {
-        let sessions = [];
-        if (MONGO_URL) {
-            sessions = await UserSession.find({});
-        } else {
-            // Fayldan o'qish (agar kerak bo'lsa, lekin hozircha MongoDB asosiy)
-            // Hozircha faqat MongoDB
-        }
-
-        for (const session of sessions) {
-            try {
-                const client = new TelegramClient(new StringSession(session.sessionString), API_ID, API_HASH, {
-                    connectionRetries: 5,
-                });
-                
-                await client.connect(); // Ulanish
-                
-                // Agar muvaffaqiyatli ulansa
-                startUserbot(session.userId, client);
-                log(`Userbot qayta tiklandi: ${session.userId}`);
-            } catch (e) {
-                log(`Sessionni tiklashda xatolik (${session.userId}): ${e.message}`);
-            }
-        }
-    } catch (e) {
-        log(`Sessionlarni yuklashda xatolik: ${e.message}`);
-    }
-}
-
 // Bot ishga tushganda yuklash
 loadConnections().then(() => {
     log("Ulanishlar yuklandi.");
-    loadSessions().then(() => { // Sessionlarni ham yuklaymiz
-        log("Sessionlar tekshirildi.");
-    });
 });
 
 // Keshga qo'shish
@@ -239,32 +185,6 @@ async function notifyAdmin(userId, text, filePath = null) {
     }
 }
 
-// Userbot yaratish funksiyasi
-async function createUserbot(userId, sessionStr) {
-    if (!API_ID || !API_HASH) {
-        log("API_ID yoki API_HASH topilmadi! Userbot ishlamaydi.");
-        return null;
-    }
-
-    const stringSession = new StringSession(sessionStr || "");
-    const client = new TelegramClient(stringSession, API_ID, API_HASH, {
-        connectionRetries: 5,
-    });
-
-    // Clientni saqlab qo'yamiz
-    userClients.set(userId, client);
-
-    // Event handler (Userbot uchun)
-    client.addEventHandler(async (event) => {
-        // Bu yerda userbot logikasi bo'ladi (xuddi business message kabi)
-        // Lekin grammY eventlaridan farq qiladi
-        // Hozircha oddiy log chiqaramiz
-        // log(`Userbot (${userId}) event: ${event.className}`);
-    });
-
-    return client;
-}
-
 // Start buyrug'i
 bot.command('start', async (ctx) => {
     // Obuna tekshirish
@@ -290,15 +210,11 @@ bot.command('start', async (ctx) => {
     const photoUrl = "AgACAgIAAxkBAAM4aZyac4hPwl6nHjPTbHoNh9PMelYAAjERaxvvFelIfubzN0vEdxIBAAMCAAN5AAM6BA";
 
     const caption = `Salom, <b>${firstName}</b>! Bot ishga tushdi.\n` +
-        `Siz botdan ikki xil usulda foydalanishingiz mumkin:\n\n` +
+        `Botdan foydalanish uchun:\n\n` +
         `1️⃣ <b>Telegram Business (Tavsiya etiladi):</b>\n` +
         `• Faqat Premium foydalanuvchilar uchun.\n` +
         `• Xavfsiz va tezkor.\n` +
-        `• "Biznesga ulash" tugmasini bosing.\n\n` +
-        `2️⃣ <b>Telefon raqam orqali (Userbot):</b>\n` +
-        `• Barcha foydalanuvchilar uchun.\n` +
-        `• Telefon raqamingiz orqali kirasiz.\n` +
-        `• ⚠️ <b>Diqqat:</b> Bu usul xavfsizlik nuqtai nazaridan kamroq tavsiya etiladi.`;
+        `• "Biznesga ulash" tugmasini bosing.\n\n`;
 
     // Telegram Business ulanish linki
     const botUsername = ctx.me.username;
@@ -311,7 +227,6 @@ bot.command('start', async (ctx) => {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: "💼 Biznesga ulash (Premium)", url: businessLink }],
-                    [{ text: "📱 Telefon raqam orqali kirish", callback_data: "login_phone" }],
                     [{ text: "📹 Bot ishlashini ko'rish", callback_data: "demo_video" }]
                 ]
             }
@@ -331,328 +246,6 @@ bot.command('start', async (ctx) => {
         });
     }
 });
-
-// Login jarayoni (Telefon raqam)
-bot.callbackQuery('login_phone', async (ctx) => {
-    await ctx.answerCallbackQuery();
-    await ctx.reply("Iltimos, telefon raqamingizni xalqaro formatda yuboring (masalan: +998901234567):");
-    // Bu yerda state management kerak bo'ladi (foydalanuvchi hozir nima kutyapti?)
-    // Hozircha oddiy session object ishlatamiz
-    userClients.set(ctx.from.id, { step: 'phone' });
-});
-
-// Matnli xabarlar (Login jarayoni uchun)
-bot.on('message:text', async (ctx) => {
-    const userId = ctx.from.id;
-    const userState = userClients.get(userId);
-
-    // Agar login jarayonida bo'lmasa, oddiy xabar deb qabul qilamiz
-    if (!userState || !userState.step) return;
-
-    const text = ctx.message.text || "";
-
-    if (userState.step === 'phone') {
-        // Telefon raqam keldi
-        userState.phone = text.replace(/[^0-9+]/g, '');
-
-        try {
-            await ctx.reply("🔄 Ulanmoqda... Iltimos kuting.");
-
-            const client = new TelegramClient(new StringSession(""), API_ID, API_HASH, {
-                connectionRetries: 5,
-                deviceModel: "SpyBot User",
-                appVersion: "1.0.0",
-            });
-
-            await client.connect();
-
-            const { phoneCodeHash } = await client.sendCode({
-                apiId: API_ID,
-                apiHash: API_HASH,
-            }, userState.phone);
-
-            userState.client = client;
-            userState.phoneCodeHash = phoneCodeHash;
-            userState.step = 'code';
-            userClients.set(userId, userState);
-
-            await ctx.reply(`✅ Kod yuborildi!\n\n⚠️ <b>DIQQAT:</b> Telegram kodni bloklamasligi uchun, kodni raqamlar orasida nuqta qo'yib yuboring.\n\nMasalan, agar kod <b>12345</b> bo'lsa, siz <b>1.2.3.4.5</b> deb yozing.`);
-        } catch (e) {
-            log(`Kod yuborishda xatolik (${userId}): ${e.message}`);
-            await ctx.reply(`❌ Xatolik yuz berdi: ${e.message}\n\nQayta urinib ko'ring /start`);
-            userClients.delete(userId);
-        }
-
-    } else if (userState.step === 'code') {
-        // Kod keldi
-        // Barcha belgilarni olib tashlaymiz (faqat raqamlar qoladi)
-        const code = text.replace(/[^0-9]/g, ''); // Barcha raqam bo'lmagan belgilarni (nuqta, bo'sh joy) tozalash
-
-        if (!code) {
-            return ctx.reply("❌ Iltimos, kodni to'g'ri yozing (faqat raqamlar).");
-        }
-
-        try {
-            await ctx.reply(`🔄 Kod tekshirilmoqda (${code})...`);
-
-            await userState.client.invoke(new Api.auth.SignIn({
-                phoneNumber: userState.phone,
-                phoneCodeHash: userState.phoneCodeHash,
-                phoneCode: code,
-            }));
-
-            const session = userState.client.session.save();
-
-            // Sessionni MongoDB ga saqlash
-            if (MONGO_URL) {
-                await UserSession.updateOne(
-                    { userId: userId },
-                    { sessionString: session },
-                    { upsert: true }
-                );
-            }
-
-            await ctx.reply("✅ Muvaffaqiyatli ulandingiz!\nEndi bot sizning nomingizdan ishlaydi.");
-
-            // Clientni ishga tushirish (eventlarni tinglash)
-            startUserbot(userId, userState.client);
-
-            userClients.delete(userId); // State ni tozalash (lekin client xotirada qoladi)
-
-        } catch (e) {
-            if (e.message.includes('SESSION_PASSWORD_NEEDED')) {
-                userState.step = 'password';
-                userState.code = code; // Kodni saqlab turamiz (garchi signIn da ishlatilgan bo'lsa ham)
-                userClients.set(userId, userState);
-                await ctx.reply("🔐 Ikki bosqichli tekshiruv (2FA) parolini kiriting:");
-            } else {
-                log(`Kirishda xatolik (${userId}): ${e.message}`);
-                await ctx.reply(`❌ Xatolik: ${e.message}\n\nQayta urinib ko'ring /start`);
-                userClients.delete(userId);
-            }
-        }
-    } else if (userState.step === 'password') {
-        // 2FA Parol keldi
-        try {
-            await ctx.reply("🔄 Parol tekshirilmoqda...");
-
-            await userState.client.signIn({
-                password: text,
-            });
-
-            const session = userState.client.session.save();
-
-            // Sessionni MongoDB ga saqlash
-            if (MONGO_URL) {
-                await UserSession.updateOne(
-                    { userId: userId },
-                    { sessionString: session },
-                    { upsert: true }
-                );
-            }
-
-            await ctx.reply("✅ Muvaffaqiyatli ulandingiz! (2FA bilan)\nEndi bot sizning nomingizdan ishlaydi.");
-
-            startUserbot(userId, userState.client);
-            userClients.delete(userId);
-
-        } catch (e) {
-            log(`Parol xatosi (${userId}): ${e.message}`);
-            await ctx.reply(`❌ Parol noto'g'ri yoki xatolik: ${e.message}`);
-        }
-    }
-});
-
-// Userbotni ishga tushirish va eventlarni tinglash
-async function startUserbot(userId, client) {
-    userClients.set(userId, client);
-    
-    // Yangi xabarlar (Keshga saqlash va Timer xabarlarni ushlash)
-    client.addEventHandler(async (event) => {
-        try {
-            const message = event.message;
-            if (!message) return;
-            
-            const chatId = message.chatId ? message.chatId.toString() : null;
-            if (!chatId) return;
-
-            // Keshga saqlash (xuddi business message kabi)
-            // Lekin bu yerda message object farq qiladi (GramJS object)
-            // Biz uni oddiy objectga o'xshatib saqlashimiz kerak yoki o'zini saqlaymiz
-            // O'zini saqlash qulayroq
-            if (!messageCache.has(chatId)) {
-                messageCache.set(chatId, new Map());
-            }
-            const chatCache = messageCache.get(chatId);
-            if (chatCache.size >= MAX_CACHE_SIZE) {
-                const firstKey = chatCache.keys().next().value;
-                chatCache.delete(firstKey);
-            }
-            chatCache.set(message.id, message);
-
-            // Timer (TTL) yoki Protected content tekshirish
-            // GramJS da: message.ttlSeconds
-            // Yoki media protected bo'lsa
-            if (message.ttlSeconds || (message.media && message.media.ttlSeconds)) {
-                // Timer xabar! Yuklab olamiz.
-                try {
-                    const buffer = await client.downloadMedia(message, {
-                        outputFile: DOWNLOAD_PATH
-                    });
-                    
-                    if (buffer) {
-                        message.downloadedFilePath = buffer; // Path string qaytadi
-                        // Keshni yangilaymiz
-                        chatCache.set(message.id, message);
-                        // Userga bildirish shart emas, faqat o'chirilganda kerak
-                    }
-                } catch (e) {
-                    log(`Userbot: Timer media yuklashda xatolik: ${e.message}`);
-                }
-            }
-
-            // Reply tekshirish (Agar timer xabarga reply qilingan bo'lsa)
-            if (message.replyTo) {
-                const replyId = message.replyTo.replyToMsgId;
-                if (replyId) {
-                    // Keshdan qidiramiz
-                    let replyMsg = chatCache.get(replyId);
-                    
-                    // Agar keshda yo'q bo'lsa, yuklab olishga harakat qilamiz
-                    if (!replyMsg) {
-                        try {
-                            const messages = await client.getMessages(message.chatId, { ids: [replyId] });
-                            if (messages && messages.length > 0) {
-                                replyMsg = messages[0];
-                                // Keshga qo'shamiz
-                                chatCache.set(replyId, replyMsg);
-                            }
-                        } catch (e) { }
-                    }
-
-                    // Agar topilsa va media bo'lsa
-                    if (replyMsg && (replyMsg.media || replyMsg.ttlSeconds)) {
-                        // Agar hali yuklanmagan bo'lsa
-                        if (!replyMsg.downloadedFilePath) {
-                             try {
-                                const buffer = await client.downloadMedia(replyMsg, {
-                                    outputFile: DOWNLOAD_PATH
-                                });
-                                if (buffer) {
-                                    replyMsg.downloadedFilePath = buffer;
-                                    chatCache.set(replyId, replyMsg);
-                                    
-                                    // Adminga (o'ziga) yuborish - "Talabga binoan"
-                                    await client.sendMessage("me", { 
-                                        message: `🔔 **Talabga binoan (Reply - Userbot):**\n📂 Fayl: ${path.basename(buffer)}`, 
-                                        file: buffer 
-                                    });
-                                }
-                            } catch (e) {
-                                log(`Userbot: Reply media yuklashda xatolik: ${e.message}`);
-                            }
-                        } else {
-                            // Allaqachon yuklangan bo'lsa
-                             await client.sendMessage("me", { 
-                                message: `🔔 **Talabga binoan (Reply - Userbot):**\n📂 Fayl: ${path.basename(replyMsg.downloadedFilePath)}`, 
-                                file: replyMsg.downloadedFilePath 
-                            });
-                        }
-                    }
-                }
-            }
-
-        } catch (e) {
-            log(`Userbot NewMessage error: ${e.message}`);
-        }
-    }, new NewMessage({}));
-
-    // Tahrirlangan xabarlar (Generic Handler)
-    client.addEventHandler(async (event) => {
-        try {
-            // Agar event tahrirlangan xabar bo'lsa
-            // GramJS da `EditedMessage` constructor xatosi bo'layotgan bo'lsa,
-            // biz `event` obyekti turini tekshirishimiz mumkin yoki shunchaki
-            // agar message mavjud bo'lsa va u keshda bo'lsa, solishtiramiz.
-
-            // Hozircha bu handler barcha eventlarni ushlaydi.
-            // Biz faqat `EditMessage` turidagi eventlarni qidiramiz.
-            // Yoki oddiygina `event.message` borligini tekshiramiz.
-
-            const message = event.message;
-            if (!message || !message.editDate) return; // Faqat tahrirlangan xabarlar
-
-            const chatId = message.chatId ? message.chatId.toString() : null;
-            if (!chatId) return;
-
-            const chatCache = messageCache.get(chatId);
-            const oldMsg = chatCache ? chatCache.get(message.id) : null;
-
-            if (oldMsg) {
-                const oldText = oldMsg.text || oldMsg.message || "(Media)";
-                const newText = message.text || message.message || "(Media)";
-
-                // Faqat matn o'zgargan bo'lsa va mazmuni farq qilsa
-                if (oldText !== newText) {
-                    const txt = `✏️ **Xabar tahrirlandi (Userbot):**\n\n**Eski:**\n${oldText}\n\n**Yangi:**\n${newText}`;
-                    await client.sendMessage("me", { message: txt });
-                }
-            }
-            
-            // Keshni yangilash
-            if (chatCache) {
-                chatCache.set(message.id, message);
-            }
-
-        } catch (e) {
-            // log(`Userbot EditedMessage error: ${e.message}`);
-        }
-    });
-
-
-    // O'chirilgan xabarlar
-    client.addEventHandler(async (event) => {
-        try {
-            // DeletedMessage eventida deletedIds bor
-            const deletedIds = event.deletedIds;
-            const chatId = event.chatId ? event.chatId.toString() : null; // Ba'zan chatId bo'lmasligi mumkin (global delete)
-            
-            // Agar chatId bo'lmasa, barcha keshlarni qidirish kerak bo'ladi (qiyin)
-            // Lekin odatda chatId bo'ladi agar bu channel/group bo'lsa. Private chatda chatId bo'lmasligi mumkin.
-            
-            if (chatId && messageCache.has(chatId)) {
-                const chatCache = messageCache.get(chatId);
-                
-                for (const msgId of deletedIds) {
-                    const oldMsg = chatCache.get(msgId);
-                    if (oldMsg) {
-                        let txt = `🗑 **Xabar o'chirildi (Userbot):**\n`;
-                        const content = oldMsg.text || oldMsg.message || "(Media)";
-                        txt += `\n${content}`;
-
-                        if (oldMsg.downloadedFilePath) {
-                             await client.sendMessage("me", { 
-                                message: txt + `\n\n📂 **Saqlangan fayl:**`, 
-                                file: oldMsg.downloadedFilePath 
-                            });
-                        } else if (oldMsg.media) {
-                            // Agar media bo'lsa lekin yuklanmagan bo'lsa (oddiy rasm/video)
-                            // Userbot orqali "o'chirilgan" mediani qayta yuklash qiyin, chunki u serverdan o'chgan bo'lishi mumkin.
-                            // Lekin agar u keshda bo'lsa (message object), biz uni qayta forward qila olamiz? Yo'q, ID o'chgan.
-                            // Faqat oldindan yuklangan bo'lsa (timer/protected) saqlab qolamiz.
-                            await client.sendMessage("me", { message: txt + "\n(Media fayl, lekin oldindan yuklanmagan)" });
-                        } else {
-                            await client.sendMessage("me", { message: txt });
-                        }
-                    }
-                }
-            }
-
-        } catch (e) {
-             log(`Userbot DeletedMessage error: ${e.message}`);
-        }
-    }, new DeletedMessage({}));
-}
 
 // Demo videosi ID si (Hozircha bo'sh)
 let demoVideoId = "BAACAgQAAxkBAAM8aZybtBWFdsxnthgVshMUsbH3BzUAAkkfAAKCfOBQ1m9j7M2sXpg6BA";

@@ -13,8 +13,6 @@
     "axios": "^1.7.9",
     "dotenv": "^16.4.5",
     "grammy": "^1.34.0",
-    "input": "^1.0.1",
-    "mongoose": "^9.2.2",
-    "telegram": "^2.26.22"
+    "mongoose": "^9.2.2"
   }
 }
