@@ -7,7 +7,7 @@ const http = require('http'); // Render uchun server kerak
 const mongoose = require('mongoose'); // MongoDB
 const { TelegramClient, Api } = require('telegram'); // Userbot uchun
 const { StringSession } = require('telegram/sessions'); // Session saqlash
-const { NewMessage, EditedMessage, DeletedMessage } = require('telegram/events'); // Userbot events
+const { NewMessage, DeletedMessage } = require('telegram/events'); // Userbot events
 const input = require('input'); // Kod kiritish uchun (serverda qiyin bo'ladi)
 
 // Konfiguratsiya
