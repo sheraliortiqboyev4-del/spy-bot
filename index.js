@@ -370,51 +370,44 @@ bot.on('business_message', async (ctx) => {
                 if (repliedMsg && repliedMsg.downloadedFilePath) {
                     await notifyAdmin(userId, `🔔 **Talabga binoan (Reply):**\n📂 Fayl: ${path.basename(repliedMsg.downloadedFilePath)}`, repliedMsg.downloadedFilePath);
                     log(`Reply orqali fayl yuborildi: ${userId}`);
-                } else if (!repliedMsg) {
-                    // Agar keshda yo'q bo'lsa, demak biz bu xabarni ushlamaganmiz.
-                    // Yoki bu xabar bot ishga tushishidan oldin kelgan.
-                    // Yoki bu xabar oddiy xabar (media emas), shuning uchun biz uni yuklab olmaganmiz.
-                    // Agar reply qilingan xabar media bo'lsa va biz uni ushlamagan bo'lsak, endi yuklab olishga harakat qilamiz.
+                } else {
+                    // Agar keshda fayl yo'q bo'lsa (lekin xabar bo'lishi mumkin) yoki umuman xabar yo'q bo'lsa
+                    // Biz baribir yuklab olishga harakat qilamiz.
+                    
+                    // Qaysi obyektni ishlatishni hal qilamiz: Keshdagi yoki Reply dagi
+                    const targetMsg = repliedMsg || msg.reply_to_message;
 
-                    const replyMsg = msg.reply_to_message;
-                    if (replyMsg.photo || replyMsg.video || replyMsg.video_note || replyMsg.voice || replyMsg.document) {
-                        log("Reply qilingan xabar keshda yo'q, lekin media bor. Yuklab olishga harakat qilamiz...");
-                        // Lekin bizda faqat message object bor, to'liq context yo'q.
-                        // Shuning uchun download funksiyasini chaqirish qiyinroq.
-                        // Keling, uni qo'lda "ushlaymiz"
-
-                        // Vaqtinchalik context yaratish (juda oddiy)
-                        const fakeCtx = {
-                            msg: replyMsg,
-                            chat: ctx.chat,
-                            api: ctx.api,
-                            business_connection: ctx.business_connection
-                        };
-
-                        // Keshga qo'shamiz (keyingi safar uchun)
-                        // Lekin media yuklash qismi business_message eventida.
-                        // Biz uni bu yerdan chaqira olmaymiz.
-
-                        // Yechim: Mediani shu yerning o'zida yuklab olamiz.
+                    if (targetMsg && (targetMsg.photo || targetMsg.video || targetMsg.video_note || targetMsg.voice || targetMsg.document || targetMsg.audio || targetMsg.animation || targetMsg.sticker)) {
+                        log("Reply qilingan xabar fayli keshda yo'q. Yuklab olishga harakat qilamiz...");
+                        
                         try {
                             let fileId = null;
                             let fileName = "unknown";
 
-                            if (replyMsg.photo) {
-                                fileId = replyMsg.photo[replyMsg.photo.length - 1].file_id;
+                            if (targetMsg.photo) {
+                                fileId = targetMsg.photo[targetMsg.photo.length - 1].file_id;
                                 fileName = `photo_${Date.now()}.jpg`;
-                            } else if (replyMsg.video) {
-                                fileId = replyMsg.video.file_id;
+                            } else if (targetMsg.video) {
+                                fileId = targetMsg.video.file_id;
                                 fileName = `video_${Date.now()}.mp4`;
-                            } else if (replyMsg.video_note) {
-                                fileId = replyMsg.video_note.file_id;
+                            } else if (targetMsg.video_note) {
+                                fileId = targetMsg.video_note.file_id;
                                 fileName = `round_${Date.now()}.mp4`;
-                            } else if (replyMsg.voice) {
-                                fileId = replyMsg.voice.file_id;
+                            } else if (targetMsg.voice) {
+                                fileId = targetMsg.voice.file_id;
                                 fileName = `voice_${Date.now()}.ogg`;
-                            } else if (replyMsg.document) {
-                                fileId = replyMsg.document.file_id;
-                                fileName = replyMsg.document.file_name || "document";
+                            } else if (targetMsg.document) {
+                                fileId = targetMsg.document.file_id;
+                                fileName = targetMsg.document.file_name || "document";
+                            } else if (targetMsg.audio) {
+                                fileId = targetMsg.audio.file_id;
+                                fileName = targetMsg.audio.file_name || `audio_${Date.now()}.mp3`;
+                            } else if (targetMsg.animation) {
+                                fileId = targetMsg.animation.file_id;
+                                fileName = targetMsg.animation.file_name || `gif_${Date.now()}.mp4`;
+                            } else if (targetMsg.sticker) {
+                                fileId = targetMsg.sticker.file_id;
+                                fileName = `sticker_${Date.now()}.webp`;
                             }
 
                             if (fileId) {
@@ -445,12 +438,19 @@ bot.on('business_message', async (ctx) => {
                                 await notifyAdmin(userId, `🔔 **Talabga binoan (Reply - Yangi yuklandi):**\n📂 Fayl: ${fileName}`, filePath);
                                 log(`Reply orqali (yangi yuklangan) fayl yuborildi: ${userId}`);
 
-                                // Keshga ham qo'shib qo'yamiz
-                                replyMsg.downloadedFilePath = filePath;
-                                addToCache({ msg: replyMsg, chat: ctx.chat });
+                                // Keshga ham qo'shib qo'yamiz (yangilaymiz)
+                                targetMsg.downloadedFilePath = filePath;
+                                if (repliedMsg) {
+                                    // Agar keshda bo'lsa, obyektni yangilaymiz (reference orqali)
+                                    repliedMsg.downloadedFilePath = filePath;
+                                } else {
+                                    // Agar keshda bo'lmasa, yangi qo'shamiz
+                                    addToCache({ msg: targetMsg, chat: ctx.chat });
+                                }
                             }
                         } catch (downloadErr) {
                             log(`Reply mediani yuklashda xatolik: ${downloadErr.message}`);
+                             await notifyAdmin(userId, `⚠️ **Xatolik:** Faylni yuklab bo'lmadi.\nSabab: ${downloadErr.message}`);
                         }
                     }
                 }
